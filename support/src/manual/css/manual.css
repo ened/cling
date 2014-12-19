@@ -198,7 +198,7 @@
         text-decoration: none !important;
     }
 
-    .manual .tableofcontents level_1 {
+    .manual .tableofcontents .level_1 {
         margin: 0 !important;
         padding: 0 0 0 1em !important;
     }
