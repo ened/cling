@@ -3,10 +3,9 @@
   <groupId>org.fourthline.cling</groupId>
   <artifactId>cling-mediarenderer</artifactId>
   <versioning>
-    <release>2.0.1</release>
     <versions>
-      <version>2.0.1</version>
+      <version>2.0.1-SR-SNAPSHOT</version>
     </versions>
-    <lastUpdated>20150317102509</lastUpdated>
+    <lastUpdated>20150317102703</lastUpdated>
   </versioning>
 </metadata>
