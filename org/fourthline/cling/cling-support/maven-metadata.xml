@@ -4,8 +4,8 @@
   <artifactId>cling-support</artifactId>
   <versioning>
     <versions>
-      <version>2.0.1-SR-SNAPSHOT</version>
+      <version>2.0.2-SR-SNAPSHOT</version>
     </versions>
-    <lastUpdated>20150325042423</lastUpdated>
+    <lastUpdated>20150409103057</lastUpdated>
   </versioning>
 </metadata>
