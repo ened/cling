@@ -26,6 +26,8 @@ import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Message;
+import com.whitebyte.wifihotspotutils.WIFI_AP_STATE;
+import com.whitebyte.wifihotspotutils.WifiApManager;
 import org.fourthline.cling.model.ModelUtil;
 import org.fourthline.cling.protocol.ProtocolFactory;
 import org.fourthline.cling.transport.Router;
@@ -35,6 +37,11 @@ import org.fourthline.cling.transport.spi.InitializationException;
 import org.seamless.util.Exceptions;
 
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -59,11 +66,13 @@ public class AndroidRouter extends RouterImpl {
 
     private final WifiManager wifiManager;
     private final WifiP2pManager wifiP2pManager;
+    private final WifiApManager wifiApManager;
     private MyHandlerThread handlerThread;
     private final int[] allowedNetworkTypes;
     protected WifiManager.MulticastLock multicastLock;
     protected WifiManager.WifiLock wifiLock;
     protected BroadcastReceiver broadcastReceiver;
+    protected BroadcastReceiver wifiStateBroadcastReceiver;
     protected BroadcastReceiver wifiP2pBroadcastReceiver;
 
     public AndroidRouter(AndroidUpnpServiceConfiguration configuration,
@@ -74,6 +83,7 @@ public class AndroidRouter extends RouterImpl {
         this.context = context;
         this.wifiManager = ((WifiManager) context.getSystemService(Context.WIFI_SERVICE));
         this.wifiP2pManager = (WifiP2pManager) context.getSystemService(Context.WIFI_P2P_SERVICE);
+        this.wifiApManager = new WifiApManager(context);
         this.allowedNetworkTypes = configuration.getAllowedNetworkTypes();
         Arrays.sort(allowedNetworkTypes);
 
@@ -82,6 +92,9 @@ public class AndroidRouter extends RouterImpl {
             this.broadcastReceiver = createConnectivityBroadcastReceiver();
             context.registerReceiver(broadcastReceiver, new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION));
 
+            this.wifiStateBroadcastReceiver = createWifiStateBroadcastReceiver();
+            context.registerReceiver(wifiStateBroadcastReceiver, new IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION));
+
             this.wifiP2pBroadcastReceiver = createWifiP2pBroadcastReceiver();
             context.registerReceiver(wifiP2pBroadcastReceiver, new IntentFilter(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION));
         }
@@ -89,6 +102,10 @@ public class AndroidRouter extends RouterImpl {
 
     protected BroadcastReceiver createConnectivityBroadcastReceiver() {
         return new ConnectivityBroadcastReceiver();
+    }
+
+    private BroadcastReceiver createWifiStateBroadcastReceiver() {
+        return new WifiStateBroadcastReceiver();
     }
 
     protected BroadcastReceiver createWifiP2pBroadcastReceiver() {
@@ -201,6 +218,10 @@ public class AndroidRouter extends RouterImpl {
             broadcastReceiver = null;
         }
 
+        if (wifiStateBroadcastReceiver != null) {
+            context.unregisterReceiver(wifiStateBroadcastReceiver);
+            wifiStateBroadcastReceiver = null;
+        }
         if (wifiP2pBroadcastReceiver != null) {
             context.unregisterReceiver(wifiP2pBroadcastReceiver);
             wifiP2pBroadcastReceiver = null;
@@ -276,6 +297,104 @@ public class AndroidRouter extends RouterImpl {
                 return;
 
             Collection<NetworkInfo> infos = NetworkUtils.getConnectedNetworks(context);
+
+            if (wifiApManager.getWifiApState() == WIFI_AP_STATE.WIFI_AP_STATE_ENABLED) {
+                // If this is true, then we need to find the WiFi adhoc interface.
+                try {
+                    ArrayList<NetworkInterface> interfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
+                    for (NetworkInterface iface : interfaces) {
+
+                        List<InterfaceAddress> interfaceAddresses = iface.getInterfaceAddresses();
+                        for (InterfaceAddress interfaceAddress : interfaceAddresses) {
+                            if (interfaceAddress.getBroadcast() != null && interfaceAddress.getNetworkPrefixLength() == 24) {
+                                // We probably have found the AdHoc network. Create an artificial Android NetworkInfo object.
+                                final NetworkInfo adHocNetworkInfo = createAdHocNetworkInfo();
+                                if (adHocNetworkInfo != null) {
+                                    infos.add(adHocNetworkInfo);
+                                }
+                            }
+                        }
+                    }
+                } catch (SocketException e) {
+                }
+            }
+
+            infos = filterAllowedNetworkTypes(infos);
+
+            handlerThread.command.sendMessage(handlerThread.command.obtainMessage(MSG_NETWORK_INFO_CHANGED, infos));
+        }
+    }
+
+    // Nice.
+    private NetworkInfo createAdHocNetworkInfo() {
+        try {
+            Constructor<NetworkInfo> constructor;
+            constructor = NetworkInfo.class.getDeclaredConstructor(
+                    int.class,
+                    int.class,
+                    String.class,
+                    String.class);
+            constructor.setAccessible(true);
+
+            NetworkInfo info = constructor.newInstance(ConnectivityManager.TYPE_WIFI, 12421, "WIFI", "WIFI_ADHOC");
+
+            Method setDetailedState = info.getClass().getDeclaredMethod("setDetailedState",
+                    NetworkInfo.DetailedState.class,
+                    String.class,
+                    String.class);
+
+            setDetailedState.invoke(info, NetworkInfo.DetailedState.CONNECTED, "Connected", "");
+
+            return info;
+
+        } catch (Exception e) {
+            log.log(Level.SEVERE, "Can not create ad hoc network info: " + e);
+            return null;
+        }
+    }
+
+    class WifiStateBroadcastReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(final Context context, final Intent intent) {
+            log.log(Level.INFO, "received: " + intent.getAction());
+
+            Collection<NetworkInfo> infos = NetworkUtils.getConnectedNetworks(context);
+
+            final WIFI_AP_STATE wifiApState = wifiApManager.getWifiApState();
+
+            log.log(Level.INFO, "WiFi AP state: " + wifiApState);
+
+            if (wifiApState == WIFI_AP_STATE.WIFI_AP_STATE_ENABLED) {
+                // If this is true, then we need to find the WiFi adhoc interface.
+
+                ArrayList<NetworkInterface> interfaces = null;
+                try {
+                    interfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
+                } catch (SocketException e) {
+                    log.log(Level.SEVERE, "Can not determine network interfaces: " + e);
+                    return;
+                }
+                for (NetworkInterface iface : interfaces) {
+                    try {
+                        if (iface.isLoopback()) {
+                            continue;
+                        }
+                    } catch (SocketException e) {
+                        log.log(Level.SEVERE, "can not determine loopback state: " + e);
+                    }
+
+                    List<InterfaceAddress> interfaceAddresses = iface.getInterfaceAddresses();
+                    for (InterfaceAddress interfaceAddress : interfaceAddresses) {
+                        if (interfaceAddress.getBroadcast() != null && interfaceAddress.getNetworkPrefixLength() == 24) {
+                            // We probably have found the AdHoc network. Create an artificial Android NetworkInfo object.
+                            final NetworkInfo adHocNetworkInfo = createAdHocNetworkInfo();
+                            if (adHocNetworkInfo != null) {
+                                infos.add(adHocNetworkInfo);
+                            }
+                        }
+                    }
+                }
+            }
 
             infos = filterAllowedNetworkTypes(infos);
 
@@ -432,7 +551,7 @@ public class AndroidRouter extends RouterImpl {
                             thread.networkInfo.clear();
                             thread.networkInfo.addAll(current);
                         } else {
-                            log.info("Ignored network change.");
+                            log.info("Ignored network change: (" + prev.size() + " available networks)");
                         }
                     }
                 } else if (msg.what == MSG_INTERNAL_ENABLE) {
