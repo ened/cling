@@ -41,6 +41,8 @@ public class AndroidNetworkAddressFactory extends NetworkAddressFactoryImpl {
 
     private int[] allowedNetworkTypes = new int[]{};
 
+    // TODO: The previous constructor should be kept?
+
     public AndroidNetworkAddressFactory(int streamListenPort, int[] allowedNetworkTypes) {
         super(streamListenPort);
 
