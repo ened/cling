@@ -53,7 +53,7 @@ public class ContainerFormPanel extends JPanel {
         form.addLabelAndSelectableLastField("Searchable?", Boolean.toString(container.isSearchable()), this);
 
         if (container.hasProperty(DIDLObject.Property.UPNP.ICON.class))
-            form.addLabelAndSelectableLastField("UPnP Icon:", contianer.getFirstProperty(DIDLObject.Property.UPNP.ICON.class).toString(), this);
+            form.addLabelAndSelectableLastField("UPnP Icon:", container.getFirstProperty(DIDLObject.Property.UPNP.ICON.class).toString(), this);
 
         if (container.hasProperty(DIDLObject.Property.UPNP.STORAGE_FREE.class))
             form.addLabelAndSelectableLastField("UPnP Storage Free:", container.getFirstProperty(DIDLObject.Property.UPNP.STORAGE_FREE.class).toString(), this);
